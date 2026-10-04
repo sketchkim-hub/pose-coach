@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>포즈코치 — AI 운동 자세 교정</title>
+<link rel="stylesheet" href="css/style.css">
+<!-- MediaPipe -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+<!-- Firebase (선택사항: js/firebase-config.js 에 설정 입력) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+</head>
+<body>
+<header>
+  <h1>🏋️ 포즈코치</h1>
+  <p class="subtitle">듀얼 카메라 AI 운동 자세 교정</p>
+  <span id="store-badge" class="badge">로컬 저장 모드</span>
+</header>
+
+<main>
+  <!-- 설정 패널 -->
+  <section id="setup-panel" class="card">
+    <h2>카메라 설정</h2>
+    <div class="cam-row">
+      <div class="cam-select">
+        <label>카메라 1</label>
+        <select id="cam1-device"></select>
+        <select id="cam1-role">
+          <option value="side">측면 (각도 측정용)</option>
+          <option value="front">정면 (대칭 확인용)</option>
+        </select>
+      </div>
+      <div class="cam-select">
+        <label>카메라 2</label>
+        <select id="cam2-device"></select>
+        <select id="cam2-role">
+          <option value="front">정면 (대칭 확인용)</option>
+          <option value="side">측면 (각도 측정용)</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>운동</label>
+        <select id="exercise">
+          <option value="squat">스쿼트</option>
+        </select>
+      </div>
+      <div class="btn-group">
+        <button id="btn-start" class="primary">측정 시작</button>
+        <button id="btn-stop" disabled>종료 및 저장</button>
+      </div>
+    </div>
+    <p class="hint">💡 측면 카메라는 몸의 옆모습이, 정면 카메라는 앞모습이 나오도록 배치하세요. 전신이 화면에 들어와야 합니다.</p>
+  </section>
+
+  <!-- 카메라 화면 -->
+  <section id="stage" class="hidden">
+    <div class="videos">
+      <div class="video-box">
+        <div class="video-label">측면 카메라</div>
+        <video id="video-side" playsinline muted></video>
+        <canvas id="canvas-side"></canvas>
+      </div>
+      <div class="video-box">
+        <div class="video-label">정면 카메라</div>
+        <video id="video-front" playsinline muted></video>
+        <canvas id="canvas-front"></canvas>
+      </div>
+    </div>
+
+    <div class="dashboard">
+      <div class="card stats">
+        <h2>실시간 측정</h2>
+        <div class="stat-grid">
+          <div class="stat"><span class="k">무릎 각도</span><span class="v" id="stat-knee">-</span></div>
+          <div class="stat"><span class="k">엉덩이 각도</span><span class="v" id="stat-hip">-</span></div>
+          <div class="stat"><span class="k">상체 기울기</span><span class="v" id="stat-back">-</span></div>
+          <div class="stat"><span class="k">현재 단계</span><span class="v" id="stat-phase">대기</span></div>
+          <div class="stat big"><span class="k">횟수</span><span class="v" id="stat-reps">0</span></div>
+          <div class="stat big"><span class="k">평균 점수</span><span class="v" id="stat-score">-</span></div>
+        </div>
+      </div>
+      <div class="card feedback">
+        <h2>자세 피드백</h2>
+        <ul id="feedback-list">
+          <li class="idle">카메라 앞에 서서 운동을 시작하세요.</li>
+        </ul>
+        <h2>최근 기록</h2>
+        <ul id="rep-log"></ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 세션 기록 -->
+  <section class="card">
+    <h2>운동 기록</h2>
+    <ul id="history-list"><li class="idle">아직 저장된 기록이 없습니다.</li></ul>
+  </section>
+
+  <footer>
+    <p>⚠️ 참고용 자세 가이드입니다. 통증이 있으면 중단하고 전문가와 상담하세요. 카메라 영상은 기기를 떠나지 않습니다.</p>
+  </footer>
+</main>
+
+<script src="js/firebase-config.js"></script>
+<script src="js/store.js"></script>
+<script src="js/pose-engine.js"></script>
+<script src="js/analyzer.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
