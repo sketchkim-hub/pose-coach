@@ -1,0 +1,54 @@
+# TWA Android 빌드 (Bubblewrap) — 포즈코치
+# 태그 푸시(twa-v1.0.0 형식) 또는 수동 실행 시 서명된 AAB를 빌드해 Artifacts에 올립니다.
+# 필요 Secrets (저장소 Settings > Secrets and variables > Actions):
+#   ANDROID_KEYSTORE_B64          : android.p12 파일을 base64로 인코딩한 값
+#   BUBBLEWRAP_KEYSTORE_PASSWORD  : 키스토어 비밀번호
+#   BUBBLEWRAP_KEY_PASSWORD       : 키 비밀번호 (키스토어와 동일)
+name: TWA Android Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'twa-v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Bubblewrap
+        run: npm install -g @bubblewrap/cli
+
+      - name: Prepare project files
+        run: |
+          mkdir -p twa
+          cp twa-manifest.json twa/twa-manifest.json
+          echo "$ANDROID_KEYSTORE_B64" | base64 -d > twa/android.p12
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+
+      - name: Build signed AAB
+        working-directory: twa
+        run: bubblewrap build --manifest=./twa-manifest.json
+        env:
+          BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ secrets.BUBBLEWRAP_KEYSTORE_PASSWORD }}
+          BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.BUBBLEWRAP_KEY_PASSWORD }}
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: posecoach-aab
+          path: twa/app-release-bundle.aab
