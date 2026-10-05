@@ -8,7 +8,7 @@
 <link rel="icon" type="image/png" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <title>포즈코치 — AI 운동 자세 교정</title>
-<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/style.css?v=3">
 <!-- MediaPipe -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -54,6 +54,13 @@
           <option value="squat">스쿼트</option>
         </select>
       </div>
+      <div>
+        <label>해상도</label>
+        <select id="resolution">
+          <option value="640x480">640×480 (기본)</option>
+          <option value="1280x720">1280×720 (넓게)</option>
+        </select>
+      </div>
       <div class="btn-group">
         <button id="btn-start" class="primary">측정 시작</button>
         <button id="btn-stop" disabled>종료 및 저장</button>
@@ -64,16 +71,32 @@
 
   <!-- 카메라 화면 -->
   <section id="stage" class="hidden">
-    <div class="videos">
-      <div class="video-box">
-        <div class="video-label">측면 카메라</div>
-        <video id="video-side" playsinline muted></video>
-        <canvas id="canvas-side"></canvas>
+    <div class="stage-main">
+      <div class="videos">
+        <div class="video-box">
+          <div class="video-label">측면 카메라</div>
+          <video id="video-side" playsinline muted></video>
+          <canvas id="canvas-side"></canvas>
+        </div>
+        <div class="video-box">
+          <div class="video-label">정면 카메라</div>
+          <video id="video-front" playsinline muted></video>
+          <canvas id="canvas-front"></canvas>
+        </div>
       </div>
-      <div class="video-box">
-        <div class="video-label">정면 카메라</div>
-        <video id="video-front" playsinline muted></video>
-        <canvas id="canvas-front"></canvas>
+      <div class="cam-controls" id="cam-controls" style="display:none">
+        <div class="ctrl">
+          <label>🔍 줌</label>
+          <input type="range" id="zoom-range" min="1" max="1" step="0.1" value="1" disabled>
+          <span id="zoom-val">-</span>
+        </div>
+        <div class="ctrl">
+          <label>화면</label>
+          <div class="seg">
+            <button id="fit-cover" class="on" type="button">꽉 채움</button><button id="fit-contain" type="button">전체 보기</button>
+          </div>
+        </div>
+        <span class="zoom-note" id="zoom-note"></span>
       </div>
     </div>
 
