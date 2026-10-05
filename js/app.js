@@ -14,6 +14,7 @@ let setStartTime = null;
 let running = false;
 let workoutSets = [];   // 이번 운동의 저장된 세트들
 let currentMode = 'dual'; // 'single-side' | 'single-front' | 'dual'
+let wifiSource = null;  // WiFi 카메라 소스 (휴대폰)
 
 const PHASE_KO = { ready: '대기', down: '하강 중', up: '상승 중' };
 
@@ -22,10 +23,13 @@ async function initCameras() {
   const cams = await PoseEngine.listCameras();
   const s1 = $('cam1-device'), s2 = $('cam2-device');
   s1.innerHTML = ''; s2.innerHTML = '';
+  // 카메라 1에 WiFi 카메라(휴대폰) 옵션 추가
+  s1.add(new Option('📶 WiFi 카메라 (휴대폰)', 'wificam'));
   // 카메라 2는 선택사항: '사용 안 함'을 두면 단일 카메라 모드
   s2.add(new Option('사용 안 함 (단일 카메라 모드)', ''));
   if (!cams.length) {
-    s1.innerHTML = '<option value="">카메라 없음</option>';
+    s1.add(new Option('카메라 없음', ''));
+    updateWifiRow();
     return;
   }
   cams.forEach((c, i) => {
@@ -36,6 +40,85 @@ async function initCameras() {
   // 2개 이상이면 서로 다른 카메라를 기본 선택, 1개면 단일 모드 기본
   if (cams.length > 1) s2.selectedIndex = 1;
   else s2.selectedIndex = 0;
+  updateWifiRow();
+}
+
+/* ---------- WiFi 카메라 (휴대폰) ---------- */
+/** 카메라 1 선택에 따라 휴대폰 주소 입력란 표시/숨김 */
+function updateWifiRow() {
+  const isWifi = $('cam1-device').value === 'wificam';
+  $('wificam-url').style.display = isWifi ? '' : 'none';
+  $('wificam-hint').style.display = isWifi ? '' : 'none';
+}
+
+/**
+ * 휴대폰 MJPEG 스트림을 canvas.captureStream()으로 MediaStream화
+ * lan-server.py의 /cam 프록시(same-origin)를 거쳐 가져오므로 캔버스가 taint되지 않음
+ * 반환: { stream, stop }
+ */
+function startWifiSource(url) {
+  stopWifiSource();
+  const canvas = document.createElement('canvas');
+  canvas.width = 640; canvas.height = 480;
+  const ctx = canvas.getContext('2d');
+  const img = new Image();
+  let alive = true;
+  let gotFrame = false;
+  let failed = false;
+
+  const drawStatus = (lines) => {
+    ctx.fillStyle = '#101625';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#e8ecf4';
+    ctx.font = '20px sans-serif';
+    ctx.textAlign = 'center';
+    lines.forEach((t, i) => ctx.fillText(t, canvas.width / 2, canvas.height / 2 - 10 + i * 30));
+  };
+
+  img.onerror = () => { failed = true; };
+  // 프록시가 없거나 주소가 틀리면 8초 뒤 안내 표시
+  setTimeout(() => {
+    if (alive && !gotFrame) failed = true;
+  }, 8000);
+
+  img.src = '/cam?src=' + encodeURIComponent(url);
+
+  const draw = () => {
+    if (!alive) return;
+    if (img.naturalWidth > 0) {
+      gotFrame = true;
+      // cover 방식으로 캔버스에 맞춤
+      const iw = img.naturalWidth, ih = img.naturalHeight;
+      const scale = Math.max(canvas.width / iw, canvas.height / ih);
+      const w = iw * scale, h = ih * scale;
+      ctx.drawImage(img, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
+    } else if (failed) {
+      drawStatus(['휴대폰에 연결하지 못했어요.', 'IP Webcam 주소와', 'PC의 lan-server.py 실행을 확인하세요.']);
+    } else {
+      drawStatus(['휴대폰 연결 중…']);
+    }
+    requestAnimationFrame(draw);
+  };
+  draw();
+
+  const stream = canvas.captureStream(30);
+  const src = {
+    stream,
+    stop() {
+      alive = false;
+      img.src = '';
+      stream.getTracks().forEach((t) => t.stop());
+    }
+  };
+  wifiSource = src;
+  return src;
+}
+
+function stopWifiSource() {
+  if (wifiSource) {
+    try { wifiSource.stop(); } catch (e) { /* 무시 */ }
+    wifiSource = null;
+  }
 }
 
 /* ---------- 측정 시작 ---------- */
@@ -91,8 +174,7 @@ async function start() {
           if (!running) return;
           renderSide(analyzer.analyzeSide(lm));
         });
-        await engineSide.start(dev1, resOpts);
-        await setupZoom(engineSide);
+        await beginSingleEngine(engineSide, dev1, resOpts);
       } else {
         // 정면 단독: 대칭 체크 + 엉덩이 이동 기반 rep 카운트 (간이 채점)
         currentMode = 'single-front';
@@ -102,8 +184,7 @@ async function start() {
           if (!running) return;
           renderFront(analyzer.analyzeFrontSolo(lm));
         });
-        await engineFront.start(dev1, resOpts);
-        await setupZoom(engineFront);
+        await beginSingleEngine(engineFront, dev1, resOpts);
       }
     } else {
       // ---- 듀얼 카메라 (기존 동작) ----
@@ -149,7 +230,22 @@ async function start() {
   }
 }
 
-/** 줌 슬라이더 초기화 (하드웨어 지원 시에만 활성화) */
+/** 단일 카메라용 엔진 시작 (WiFi 카메라는 휴대폰 스트림 경유) */
+async function beginSingleEngine(engine, dev1, resOpts) {
+  if (dev1 === 'wificam') {
+    const url = $('wificam-url').value.trim();
+    if (!url) {
+      alert('휴대폰 주소를 입력해 주세요.\n예: http://192.168.0.5:8080/video');
+      throw new Error('wificam url empty');
+    }
+    localStorage.setItem('pose-coach-wificam-url', url);
+    const src = startWifiSource(url);
+    await engine.startWithStream(src.stream);
+  } else {
+    await engine.start(dev1, resOpts);
+  }
+  await setupZoom(engine);
+}
 async function setupZoom(engine) {
   const zr = $('zoom-range'), zv = $('zoom-val'), zn = $('zoom-note');
   zr.disabled = true; zr.value = 1; zv.textContent = '-'; zn.textContent = '';
@@ -259,6 +355,7 @@ async function stop(silent) {
   running = false;
   if (engineSide) { engineSide.stop(); engineSide = null; }
   if (engineFront) { engineFront.stop(); engineFront = null; }
+  stopWifiSource();
 
   if (!silent) {
     // 저장하지 않은 진행 중 세트가 있으면 마지막 세트로 자동 포함
@@ -407,6 +504,8 @@ $('btn-start').addEventListener('click', start);
 $('btn-stop').addEventListener('click', () => stop(false));
 $('btn-save-set').addEventListener('click', () => saveSet(false));
 $('btn-finish').addEventListener('click', () => stop(false));
+$('cam1-device').addEventListener('change', updateWifiRow);
+$('wificam-url').value = localStorage.getItem('pose-coach-wificam-url') || '';
 $('fit-cover').addEventListener('click', () => setFitMode('cover'));
 $('fit-contain').addEventListener('click', () => setFitMode('contain'));
 window.addEventListener('DOMContentLoaded', async () => {
