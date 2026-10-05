@@ -106,13 +106,23 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .stat .v { font-size: 22px; font-weight: bold; color: #7dffa8; }
 .stat.big .v { font-size: 30px; color: #ffd97d; }
 
-#feedback-list, #rep-log, #history-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
-#feedback-list li, #rep-log li, #history-list li {
+#feedback-list, #rep-log, #history-list, #set-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+#feedback-list li, #rep-log li, #history-list li, #set-list li {
   background: #101625; border-radius: 8px; padding: 10px 12px; font-size: 15px;
 }
-#feedback-list li.ok, #rep-log li.ok { border-left: 4px solid #00ff88; }
-#feedback-list li.warn, #rep-log li.warn { border-left: 4px solid #ff5555; }
-#feedback-list li.idle, #history-list li.idle { color: #8b93a7; }
+#feedback-list li.ok, #rep-log li.ok, #set-list li.ok { border-left: 4px solid #00ff88; }
+#feedback-list li.warn, #rep-log li.warn, #set-list li.warn { border-left: 4px solid #ff5555; }
+#feedback-list li.idle, #history-list li.idle, #set-list li.idle { color: #8b93a7; }
+
+/* 스테이지 액션 버튼 (세트 저장 / 종료) */
+.stage-actions { display: flex; gap: 10px; margin-bottom: 16px; }
+.stage-actions button {
+  flex: 1; padding: 14px; font-size: 16px; font-weight: bold;
+  border: 0; border-radius: 12px; cursor: pointer;
+}
+.stage-actions button.primary { background: #7dffa8; color: #101625; }
+.stage-actions button.secondary { background: #3a4358; color: #fff; }
+.stage-actions button:disabled { opacity: 0.4; cursor: default; }
 
 footer { text-align: center; color: #5c6579; font-size: 13px; padding: 16px; }
 
