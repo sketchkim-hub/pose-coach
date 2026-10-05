@@ -34,6 +34,23 @@ class PoseEngine {
     this.video.srcObject = this.stream;
     await this.video.play();
 
+    this._begin();
+  }
+
+  /**
+   * 이미 열려 있는 MediaStream으로 시작 (WiFi 카메라 등 getUserMedia 외 입력용)
+   * 스트림 정리는 engine.stop()이 담당 (소스 자체의 정리는 호출자가 별도 수행)
+   */
+  async startWithStream(stream) {
+    this.stream = stream;
+    this.video.srcObject = stream;
+    await this.video.play();
+
+    this._begin();
+  }
+
+  /** MediaPipe 초기화 + 프레임 루프 (start/startWithStream 공통) */
+  _begin() {
     // 캔버스 크기를 비디오에 맞춤
     const setSize = () => {
       this.canvas.width = this.video.videoWidth || 640;
