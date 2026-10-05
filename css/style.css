@@ -50,6 +50,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .hint { margin-top: 12px; font-size: 13px; color: #8b93a7; }
 
 .videos { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+.videos.single .video-box.off { display: none; }
+.videos.single .video-box { flex: 1 1 100%; max-width: 760px; margin: 0 auto; }
 .video-box {
   flex: 1; min-width: 300px; position: relative;
   background: #000; border-radius: 12px; overflow: hidden;
