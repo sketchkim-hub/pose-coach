@@ -46,6 +46,11 @@ class SquatAnalyzer {
     this.repMinKnee = 180;
     this.repMaxLean = 0;
     this.repKneeOverToe = false;
+    // 정면 단독 모드용 상태
+    this.frontBase = null;     // 선 자세 엉덩이 Y 기준값 (캘리브레이션)
+    this._frontCalib = [];
+    this.repMaxDrop = 0;
+    this.repAsym = false;
     this.lastResult = null;
   }
 
@@ -133,6 +138,76 @@ class SquatAnalyzer {
     if (shY > 0.05) fb.push('⚠️ 어깨 높이가 좌우 달라요.');
     if (kneeY > 0.06 || hipY > 0.06) fb.push('⚠️ 좌우 균형이 틀어졌어요. 정면을 보고 하세요.');
     return fb;
+  }
+
+  /**
+   * 정면 단독 모드: 대칭 체크 + 엉덩이 Y 이동 기반 rep 카운트 (간이 채점)
+   * @returns { phase, feedback[], repDone|null, depth(%), symOk }
+   */
+  analyzeFrontSolo(lm) {
+    if (!lm) {
+      return { phase: this.phase, feedback: ['정면 카메라에 몸이 잘 보이도록 서주세요.'], repDone: null, depth: null, symOk: true };
+    }
+
+    const hipY = (lm[23].y + lm[24].y) / 2;
+
+    // 베이스라인(선 자세) 캘리브레이션: 처음 30프레임 평균
+    if (this.frontBase === null) {
+      this._frontCalib.push(hipY);
+      if (this._frontCalib.length >= 30) {
+        this.frontBase = this._frontCalib.reduce((a, b) => a + b, 0) / this._frontCalib.length;
+      }
+      return { phase: 'ready', feedback: ['서 있는 자세를 인식하는 중입니다... 가만히 서 계세요.'], repDone: null, depth: null, symOk: true };
+    }
+
+    const drop = hipY - this.frontBase; // 양수 = 내려감 (정규화 좌표)
+    const sym = this.analyzeFront(lm);
+    const feedback = [];
+    let repDone = null;
+
+    if (this.phase === 'ready' || this.phase === 'up') {
+      if (drop > 0.07) {
+        this.phase = 'down';
+        this.repMaxDrop = drop;
+        this.repAsym = sym.length > 0;
+      } else {
+        this.phase = 'ready';
+      }
+    }
+
+    if (this.phase === 'down') {
+      this.repMaxDrop = Math.max(this.repMaxDrop, drop);
+      if (sym.length) this.repAsym = true;
+      if (drop < 0.025) {
+        repDone = this._scoreFrontRep();
+        this.phase = 'up';
+      }
+    }
+
+    feedback.push(...sym);
+    if (!feedback.length) {
+      feedback.push(this.phase === 'down' ? '✅ 내려가는 중... 균형을 유지하세요.' : '일어서세요. 다음 횟수를 준비하세요.');
+    }
+
+    return {
+      phase: this.phase,
+      feedback,
+      repDone,
+      depth: Math.max(0, Math.round(drop * 100)),
+      symOk: sym.length === 0
+    };
+  }
+
+  /** 정면 단독 모드 간이 채점 */
+  _scoreFrontRep() {
+    let score = 100;
+    const notes = [];
+    if (this.repMaxDrop < 0.12) { score -= 20; notes.push('깊이 부족'); }
+    if (this.repAsym) { score -= 15; notes.push('좌우 불균형'); }
+    score = Math.max(0, score);
+    this.reps += 1;
+    this.scores.push(score);
+    return { rep: this.reps, score, minKnee: null, maxLean: null, notes, front: true };
   }
 
   _scoreRep() {
