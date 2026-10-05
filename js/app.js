@@ -19,9 +19,10 @@ async function initCameras() {
   const cams = await PoseEngine.listCameras();
   const s1 = $('cam1-device'), s2 = $('cam2-device');
   s1.innerHTML = ''; s2.innerHTML = '';
+  // 카메라 2는 선택사항: '사용 안 함'을 두면 단일 카메라 모드
+  s2.add(new Option('사용 안 함 (단일 카메라 모드)', ''));
   if (!cams.length) {
     s1.innerHTML = '<option value="">카메라 없음</option>';
-    s2.innerHTML = '<option value="">카메라 없음</option>';
     return;
   }
   cams.forEach((c, i) => {
@@ -29,8 +30,9 @@ async function initCameras() {
     s1.add(new Option(label, c.deviceId));
     s2.add(new Option(label, c.deviceId));
   });
-  // 2개 이상이면 서로 다른 카메라를 기본 선택
+  // 2개 이상이면 서로 다른 카메라를 기본 선택, 1개면 단일 모드 기본
   if (cams.length > 1) s2.selectedIndex = 1;
+  else s2.selectedIndex = 0;
 }
 
 /* ---------- 측정 시작 ---------- */
@@ -55,41 +57,93 @@ async function start() {
   running = true;
   $('rep-log').innerHTML = '';
 
-  // 역할에 따라 엔진 배정 (같은 카메를 두 역할에 쓰지 않도록)
-  const assignments = [];
-  if (dev1) assignments.push({ deviceId: dev1, role: role1 });
-  if (dev2 && dev2 !== dev1) assignments.push({ deviceId: dev2, role: role2 });
+  const videosEl = document.querySelector('.videos');
+  const boxes = document.querySelectorAll('.video-box');
+  videosEl.classList.remove('single');
+  boxes.forEach((b) => b.classList.remove('off'));
 
-  const sideAsg = assignments.find((a) => a.role === 'side') || assignments[0];
-  const frontAsg = assignments.find((a) => a.role === 'front' && a !== sideAsg) || null;
+  // 카메라 2가 '사용 안 함'이거나 카메라 1과 같으면 단일 카메라 모드
+  const single = !dev2 || dev2 === dev1;
 
   try {
-    engineSide = new PoseEngine($('video-side'), $('canvas-side'), (lm) => {
-      if (!running) return;
-      const r = analyzer.analyzeSide(lm);
-      renderSide(r);
-    });
-    await engineSide.start(sideAsg.deviceId);
-    document.querySelectorAll('.video-box')[0].querySelector('.video-label').textContent =
-      `측면 카메라 (${labelOf(sideAsg.deviceId)})`;
+    if (single) {
+      // ---- 단일 카메라: 방향(role1)에 맞는 분석 자동 선택 ----
+      videosEl.classList.add('single');
+      boxes[1].classList.add('off');
+      const label = `${labelOf(dev1)} (단독)`;
 
-    if (frontAsg) {
-      engineFront = new PoseEngine($('video-front'), $('canvas-front'), (lm) => {
-        if (!running || !lm) return;
-        const fb = analyzer.analyzeFront(lm);
-        if (fb.length) renderExtraFeedback(fb);
-      });
-      await engineFront.start(frontAsg.deviceId);
-      document.querySelectorAll('.video-box')[1].querySelector('.video-label').textContent =
-        `정면 카메라 (${labelOf(frontAsg.deviceId)})`;
+      if (role1 === 'side') {
+        // 측면 단독: 각도 측정 + rep 카운트 + 채점
+        setStatLabels('side');
+        boxes[0].querySelector('.video-label').textContent = `측면 카메라 — ${label}`;
+        engineSide = new PoseEngine($('video-side'), $('canvas-side'), (lm) => {
+          if (!running) return;
+          renderSide(analyzer.analyzeSide(lm));
+        });
+        await engineSide.start(dev1);
+      } else {
+        // 정면 단독: 대칭 체크 + 엉덩이 이동 기반 rep 카운트 (간이 채점)
+        setStatLabels('front');
+        boxes[0].querySelector('.video-label').textContent = `정면 카메라 — ${label}`;
+        engineFront = new PoseEngine($('video-side'), $('canvas-side'), (lm) => {
+          if (!running) return;
+          renderFront(analyzer.analyzeFrontSolo(lm));
+        });
+        await engineFront.start(dev1);
+      }
     } else {
-      document.querySelectorAll('.video-box')[1].querySelector('.video-label').textContent =
-        '정면 카메라 (미사용)';
+      // ---- 듀얼 카메라 (기존 동작) ----
+      // 역할에 따라 엔진 배정 (같은 카메를 두 역할에 쓰지 않도록)
+      const assignments = [];
+      if (dev1) assignments.push({ deviceId: dev1, role: role1 });
+      if (dev2 && dev2 !== dev1) assignments.push({ deviceId: dev2, role: role2 });
+
+      const sideAsg = assignments.find((a) => a.role === 'side') || assignments[0];
+      const frontAsg = assignments.find((a) => a.role === 'front' && a !== sideAsg) || null;
+
+      setStatLabels('side');
+      engineSide = new PoseEngine($('video-side'), $('canvas-side'), (lm) => {
+        if (!running) return;
+        const r = analyzer.analyzeSide(lm);
+        renderSide(r);
+      });
+      await engineSide.start(sideAsg.deviceId);
+      document.querySelectorAll('.video-box')[0].querySelector('.video-label').textContent =
+        `측면 카메라 (${labelOf(sideAsg.deviceId)})`;
+
+      if (frontAsg) {
+        engineFront = new PoseEngine($('video-front'), $('canvas-front'), (lm) => {
+          if (!running || !lm) return;
+          const fb = analyzer.analyzeFront(lm);
+          if (fb.length) renderExtraFeedback(fb);
+        });
+        await engineFront.start(frontAsg.deviceId);
+        document.querySelectorAll('.video-box')[1].querySelector('.video-label').textContent =
+          `정면 카메라 (${labelOf(frontAsg.deviceId)})`;
+      } else {
+        document.querySelectorAll('.video-box')[1].querySelector('.video-label').textContent =
+          '정면 카메라 (미사용)';
+      }
     }
   } catch (e) {
     console.error(e);
     alert('카메라 시작 실패: ' + e.message);
     stop(true);
+  }
+}
+
+/** 모드에 따라 실시간 측정 라벨 전환 */
+function setStatLabels(mode) {
+  if (mode === 'front') {
+    $('lbl-knee').textContent = '하강 깊이';
+    $('lbl-hip').textContent = '좌우 대칭';
+    $('lbl-back').textContent = '채점 방식';
+    $('stat-back').textContent = '간이';
+  } else {
+    $('lbl-knee').textContent = '무릎 각도';
+    $('lbl-hip').textContent = '엉덩이 각도';
+    $('lbl-back').textContent = '상체 기울기';
+    $('stat-back').textContent = '-';
   }
 }
 
@@ -172,6 +226,34 @@ function renderExtraFeedback(msgs) {
     ul.prepend(li);
   });
   while (ul.children.length > 6) ul.removeChild(ul.lastChild);
+}
+
+/** 정면 단독 모드 렌더링 */
+function renderFront(r) {
+  $('stat-knee').textContent = (r.depth === null || r.depth === undefined) ? '-' : r.depth + '%';
+  $('stat-hip').textContent = r.symOk ? 'OK' : '⚠️';
+  $('stat-phase').textContent = PHASE_KO[r.phase] || r.phase;
+  $('stat-reps').textContent = analyzer.reps;
+  const avg = analyzer.avgScore();
+  $('stat-score').textContent = avg === null ? '-' : avg + '점';
+
+  const ul = $('feedback-list');
+  ul.innerHTML = '';
+  r.feedback.forEach((msg) => {
+    const li = document.createElement('li');
+    li.textContent = msg;
+    li.className = msg.startsWith('⚠️') ? 'warn' : 'ok';
+    ul.appendChild(li);
+  });
+
+  if (r.repDone) {
+    const li = document.createElement('li');
+    const d = r.repDone;
+    li.textContent = `#${d.rep} 완료 — ${d.score}점 (정면 간이 채점${d.notes.length ? ': ' + d.notes.join(', ') : ''})`;
+    li.className = d.score >= 80 ? 'ok' : 'warn';
+    $('rep-log').prepend(li);
+    speak(`${d.rep}회`);
+  }
 }
 
 function speak(text) {
