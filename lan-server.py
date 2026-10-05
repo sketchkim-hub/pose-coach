@@ -32,13 +32,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=BASE_DIR, **kwargs)
 
+    def _send_error_ascii(self, code, msg):
+        """send_error는 latin-1만 허용하므로 예외 메시지의 비ASCII를 치환"""
+        safe = str(msg).encode("ascii", "replace").decode("ascii")
+        self.send_error(code, safe)
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/cam":
             qs = urllib.parse.parse_qs(parsed.query)
             src = (qs.get("src") or [""])[0]
             if not src.startswith("http://"):
-                self.send_error(400, "src must be an http:// phone URL")
+                self._send_error_ascii(400, "src must be an http:// phone URL")
                 return
             self._proxy_mjpeg(src)
             return
@@ -50,7 +55,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             req = urllib.request.Request(src, headers={"User-Agent": "pose-coach-lan"})
             upstream = urllib.request.urlopen(req, timeout=10)
         except Exception as e:
-            self.send_error(502, f"Phone connection failed: {e}")
+            self._send_error_ascii(502, f"Phone connection failed: {e}")
             return
         ctype = upstream.headers.get(
             "Content-Type", "multipart/x-mixed-replace; boundary=--BoundaryString"
