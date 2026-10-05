@@ -421,6 +421,17 @@ function renderSide(r) {
     // rep 카운트 음성 피드백 (선택)
     speak(`${d.rep}회`);
   }
+  if (r.repRejected) renderRejected(r.repRejected);
+}
+
+/** 카운트되지 않은 동작 표시 */
+function renderRejected(rej) {
+  const li = document.createElement('li');
+  li.textContent = `미인정 — ${rej.msg}`;
+  li.className = 'warn';
+  const log = $('rep-log');
+  log.prepend(li);
+  while (log.children.length > 10) log.removeChild(log.lastChild);
 }
 
 let lastFrontWarn = 0;
@@ -464,6 +475,7 @@ function renderFront(r) {
     $('rep-log').prepend(li);
     speak(`${d.rep}회`);
   }
+  if (r.repRejected) renderRejected(r.repRejected);
 }
 
 function speak(text) {
