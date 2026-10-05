@@ -20,13 +20,13 @@ class PoseEngine {
     this.lastLandmarks = null;
   }
 
-  async start(deviceId) {
+  async start(deviceId, opts = {}) {
     // 1. 카메라 스트림 열기
     const constraints = {
       audio: false,
       video: {
-        width: { ideal: 640 },
-        height: { ideal: 480 },
+        width: { ideal: opts.width || 640 },
+        height: { ideal: opts.height || 480 },
         ...(deviceId ? { deviceId: { exact: deviceId } } : {})
       }
     };
@@ -94,6 +94,24 @@ class PoseEngine {
       if (this.onLandmarks) this.onLandmarks(null);
     }
     ctx.restore();
+  }
+
+  /** 하드웨어 줌 지원 범위 반환 (미지원이면 null) */
+  getZoomRange() {
+    try {
+      const track = this.stream && this.stream.getVideoTracks()[0];
+      const caps = track && track.getCapabilities ? track.getCapabilities() : null;
+      if (caps && caps.zoom) {
+        return { min: caps.zoom.min, max: caps.zoom.max, step: caps.zoom.step || 0.1 };
+      }
+    } catch (e) { /* 무시 */ }
+    return null;
+  }
+
+  /** 하드웨어 줌 설정 */
+  async setZoom(value) {
+    const track = this.stream.getVideoTracks()[0];
+    await track.applyConstraints({ advanced: [{ zoom: value }] });
   }
 
   stop() {
