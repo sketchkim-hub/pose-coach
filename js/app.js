@@ -41,6 +41,8 @@ async function start() {
   const dev2 = $('cam2-device').value;
   const role1 = $('cam1-role').value;
   const role2 = $('cam2-role').value;
+  const res = ($('resolution').value || '640x480').split('x');
+  const resOpts = { width: parseInt(res[0], 10), height: parseInt(res[1], 10) };
 
   if (!dev1 && !dev2) {
     alert('사용 가능한 카메라가 없습니다.');
@@ -69,6 +71,8 @@ async function start() {
     if (single) {
       // ---- 단일 카메라: 방향(role1)에 맞는 분석 자동 선택 ----
       videosEl.classList.add('single');
+      $('stage').classList.add('single-layout');
+      $('cam-controls').style.display = '';
       boxes[1].classList.add('off');
       const label = `${labelOf(dev1)} (단독)`;
 
@@ -80,7 +84,8 @@ async function start() {
           if (!running) return;
           renderSide(analyzer.analyzeSide(lm));
         });
-        await engineSide.start(dev1);
+        await engineSide.start(dev1, resOpts);
+        await setupZoom(engineSide);
       } else {
         // 정면 단독: 대칭 체크 + 엉덩이 이동 기반 rep 카운트 (간이 채점)
         setStatLabels('front');
@@ -89,10 +94,13 @@ async function start() {
           if (!running) return;
           renderFront(analyzer.analyzeFrontSolo(lm));
         });
-        await engineFront.start(dev1);
+        await engineFront.start(dev1, resOpts);
+        await setupZoom(engineFront);
       }
     } else {
       // ---- 듀얼 카메라 (기존 동작) ----
+      $('stage').classList.remove('single-layout');
+      $('cam-controls').style.display = 'none';
       // 역할에 따라 엔진 배정 (같은 카메를 두 역할에 쓰지 않도록)
       const assignments = [];
       if (dev1) assignments.push({ deviceId: dev1, role: role1 });
@@ -107,7 +115,7 @@ async function start() {
         const r = analyzer.analyzeSide(lm);
         renderSide(r);
       });
-      await engineSide.start(sideAsg.deviceId);
+      await engineSide.start(sideAsg.deviceId, resOpts);
       document.querySelectorAll('.video-box')[0].querySelector('.video-label').textContent =
         `측면 카메라 (${labelOf(sideAsg.deviceId)})`;
 
@@ -117,7 +125,7 @@ async function start() {
           const fb = analyzer.analyzeFront(lm);
           if (fb.length) renderExtraFeedback(fb);
         });
-        await engineFront.start(frontAsg.deviceId);
+        await engineFront.start(frontAsg.deviceId, resOpts);
         document.querySelectorAll('.video-box')[1].querySelector('.video-label').textContent =
           `정면 카메라 (${labelOf(frontAsg.deviceId)})`;
       } else {
@@ -130,6 +138,39 @@ async function start() {
     alert('카메라 시작 실패: ' + e.message);
     stop(true);
   }
+}
+
+/** 줌 슬라이더 초기화 (하드웨어 지원 시에만 활성화) */
+async function setupZoom(engine) {
+  const zr = $('zoom-range'), zv = $('zoom-val'), zn = $('zoom-note');
+  zr.disabled = true; zr.value = 1; zv.textContent = '-'; zn.textContent = '';
+  zr.oninput = null;
+  let caps = null;
+  try { caps = engine.getZoomRange(); } catch (e) { /* 무시 */ }
+  if (!caps) {
+    zn.textContent = '이 카메라는 하드웨어 줌을 지원하지 않아요. 전신이 안 나오면 카메라를 2~3m 뒤로 옮기거나 해상도를 1280×720으로 바꿔보세요.';
+    return;
+  }
+  zr.min = caps.min; zr.max = caps.max; zr.step = caps.step || 0.1; zr.value = caps.min;
+  zr.disabled = false;
+  zv.textContent = Number(caps.min).toFixed(1) + 'x';
+  if (caps.min >= 1) {
+    zn.textContent = '이 카메라의 줌은 확대(줌인)만 돼요. 화면을 넓히려면(줌아웃) 카메라를 뒤로 옮겨주세요.';
+  }
+  zr.oninput = async () => {
+    const v = parseFloat(zr.value);
+    zv.textContent = v.toFixed(1) + 'x';
+    try { await engine.setZoom(v); }
+    catch (e) { zn.textContent = '줌 조절에 실패했어요.'; }
+  };
+}
+
+/** 화면 맞춤 모드 전환 (cover=꽉 채움, contain=전체 보기) */
+function setFitMode(mode) {
+  $('fit-cover').classList.toggle('on', mode === 'cover');
+  $('fit-contain').classList.toggle('on', mode === 'contain');
+  document.querySelectorAll('#stage .video-box video, #stage .video-box canvas')
+    .forEach((el) => { el.style.objectFit = mode; });
 }
 
 /** 모드에 따라 실시간 측정 라벨 전환 */
@@ -179,6 +220,9 @@ async function stop(silent) {
   $('btn-stop').disabled = true;
   $('setup-panel').classList.remove('hidden');
   $('stage').classList.add('hidden');
+  $('stage').classList.remove('single-layout');
+  $('cam-controls').style.display = 'none';
+  setFitMode('cover');
 }
 
 /* ---------- UI 렌더링 ---------- */
@@ -287,6 +331,8 @@ async function renderHistory() {
 /* ---------- 초기화 ---------- */
 $('btn-start').addEventListener('click', start);
 $('btn-stop').addEventListener('click', () => stop(false));
+$('fit-cover').addEventListener('click', () => setFitMode('cover'));
+$('fit-contain').addEventListener('click', () => setFitMode('contain'));
 window.addEventListener('DOMContentLoaded', async () => {
   await initCameras();
   await renderHistory();
