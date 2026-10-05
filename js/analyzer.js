@@ -33,7 +33,10 @@ class SquatAnalyzer {
       downKnee: 115,   // 이 각도 아래로 내려가면 하강 시작으로 판정
       upKnee: 160,     // 이 각도 위로 올라오면 상승 완료로 판정
       targetMinKnee: 80,   // 이상적인 최저 무릎 각도 범위
-      targetMaxKnee: 105,
+      targetMaxKnee: 95,
+      countMinKnee: 100,   // ★ 이 각도 이하까지 내려가야 1회로 인정 (정밀 판정)
+      countMinDrop: 0.12,  // ★ 정면 모드: 엉덩이가 이만큼(정규화 좌표) 내려가야 인정
+      minDownMs: 450,      // ★ 하강 동작이 이 시간(ms)보다 짧으면 카운트 제외 (까딱임 방지)
       maxBackLean: 50,     // 상체 기울기 허용 한계 (도)
       maxKneeOverToe: 0.14 // 무릎-발목 수평거리 허용 한계 (정규화 좌표)
     };
@@ -49,6 +52,8 @@ class SquatAnalyzer {
     this.repKneeOverToe = false;
     this.repMaxDrop = 0;
     this.repAsym = false;
+    this.repStartTime = 0;   // 하강 시작 시각 (까딱임 판정용)
+    this.repDepthOk = false; // 인정 깊이 도달 여부
     this.lastResult = null;
   }
 
@@ -94,6 +99,7 @@ class SquatAnalyzer {
 
     const feedback = [];
     let repDone = null;
+    let repRejected = null;
 
     // 상태 머신 (히스테리시스)
     if (this.phase === 'ready' || this.phase === 'up') {
@@ -102,6 +108,8 @@ class SquatAnalyzer {
         this.repMinKnee = kneeAngle;
         this.repMaxLean = backLean;
         this.repKneeOverToe = false;
+        this.repStartTime = Date.now();
+        this.repDepthOk = false;
       } else {
         this.phase = 'ready';
       }
@@ -111,14 +119,22 @@ class SquatAnalyzer {
       this.repMinKnee = Math.min(this.repMinKnee, kneeAngle);
       this.repMaxLean = Math.max(this.repMaxLean, backLean);
       if (kneeOverToe > this.T.maxKneeOverToe) this.repKneeOverToe = true;
+      if (kneeAngle <= this.T.countMinKnee) this.repDepthOk = true;
 
       // 실시간 피드백
       if (backLean > this.T.maxBackLean) feedback.push('⚠️ 상체가 너무 앞으로 숙여졌어요. 가슴을 펴세요.');
       if (kneeOverToe > this.T.maxKneeOverToe) feedback.push('⚠️ 무릎이 발끝보다 너무 앞으로 나갔어요.');
 
       if (kneeAngle > this.T.upKnee) {
-        // 1회 완료 → 채점
-        repDone = this._scoreRep();
+        // 상승 완료 → 정밀 판정 후 카운트 여부 결정
+        const downMs = Date.now() - this.repStartTime;
+        if (!this.repDepthOk) {
+          repRejected = { reason: 'depth', msg: `❌ 깊이가 부족해 카운트되지 않았어요. (최저 ${Math.round(this.repMinKnee)}°, ${this.T.countMinKnee}° 이하까지 내려가야 해요)` };
+        } else if (downMs < this.T.minDownMs) {
+          repRejected = { reason: 'fast', msg: '❌ 너무 빨라 카운트되지 않았어요. 천천히 내려갔다 올라오세요.' };
+        } else {
+          repDone = this._scoreRep();
+        }
         this.phase = 'up';
       } else {
         this.phase = 'down';
@@ -126,10 +142,14 @@ class SquatAnalyzer {
     }
 
     if (feedback.length === 0) {
-      feedback.push(this.phase === 'down' ? '✅ 좋은 자세예요. 천천히 내려가세요.' : '일어서세요. 다음 횟수를 준비하세요.');
+      if (this.phase === 'down') {
+        feedback.push(this.repDepthOk ? '✅ 깊이 충분해요. 이제 올라오세요.' : `⬇️ 더 깊게 내려가세요. (무릎 ${this.T.countMinKnee}° 이하)`);
+      } else {
+        feedback.push('일어서세요. 다음 횟수를 준비하세요.');
+      }
     }
 
-    this.lastResult = { angles, phase: this.phase, feedback, repDone };
+    this.lastResult = { angles, phase: this.phase, feedback, repDone, repRejected };
     return this.lastResult;
   }
 
@@ -169,12 +189,15 @@ class SquatAnalyzer {
     const sym = this.analyzeFront(lm);
     const feedback = [];
     let repDone = null;
+    let repRejected = null;
 
     if (this.phase === 'ready' || this.phase === 'up') {
       if (drop > 0.07) {
         this.phase = 'down';
         this.repMaxDrop = drop;
         this.repAsym = sym.length > 0;
+        this.repStartTime = Date.now();
+        this.repDepthOk = false;
       } else {
         this.phase = 'ready';
       }
@@ -183,31 +206,44 @@ class SquatAnalyzer {
     if (this.phase === 'down') {
       this.repMaxDrop = Math.max(this.repMaxDrop, drop);
       if (sym.length) this.repAsym = true;
+      if (drop >= this.T.countMinDrop) this.repDepthOk = true;
       if (drop < 0.025) {
-        repDone = this._scoreFrontRep();
+        // 정밀 판정 후 카운트 여부 결정
+        const downMs = Date.now() - this.repStartTime;
+        if (!this.repDepthOk) {
+          repRejected = { reason: 'depth', msg: '❌ 깊이가 부족해 카운트되지 않았어요. 엉덩이를 더 낮추세요.' };
+        } else if (downMs < this.T.minDownMs) {
+          repRejected = { reason: 'fast', msg: '❌ 너무 빨라 카운트되지 않았어요. 천천히 내려갔다 올라오세요.' };
+        } else {
+          repDone = this._scoreFrontRep();
+        }
         this.phase = 'up';
       }
     }
 
     feedback.push(...sym);
     if (!feedback.length) {
-      feedback.push(this.phase === 'down' ? '✅ 내려가는 중... 균형을 유지하세요.' : '일어서세요. 다음 횟수를 준비하세요.');
+      if (this.phase === 'down') {
+        feedback.push(this.repDepthOk ? '✅ 깊이 충분해요. 올라오세요.' : '⬇️ 더 깊게 내려가세요.');
+      } else {
+        feedback.push('일어서세요. 다음 횟수를 준비하세요.');
+      }
     }
 
     return {
       phase: this.phase,
       feedback,
       repDone,
+      repRejected,
       depth: Math.max(0, Math.round(drop * 100)),
       symOk: sym.length === 0
     };
   }
 
-  /** 정면 단독 모드 간이 채점 */
+  /** 정면 단독 모드 간이 채점 (깊이는 카운트 게이트에서 이미 검증됨) */
   _scoreFrontRep() {
     let score = 100;
     const notes = [];
-    if (this.repMaxDrop < 0.12) { score -= 20; notes.push('깊이 부족'); }
     if (this.repAsym) { score -= 15; notes.push('좌우 불균형'); }
     score = Math.max(0, score);
     this.reps += 1;
@@ -218,10 +254,10 @@ class SquatAnalyzer {
   _scoreRep() {
     let score = 100;
     const notes = [];
-    const { targetMinKnee, targetMaxKnee } = this.T;
+    const { targetMaxKnee } = this.T;
 
-    if (this.repMinKnee > 120) { score -= 25; notes.push('깊이 부족'); }
-    else if (this.repMinKnee > targetMaxKnee) { score -= 10; notes.push('조금 더 깊게'); }
+    // 깊이: countMinKnee 이하만 카운트되므로, 그 안에서의 정밀 채점
+    if (this.repMinKnee > targetMaxKnee) { score -= 10; notes.push('조금 더 깊게'); }
 
     if (this.repMaxLean > this.T.maxBackLean) { score -= 15; notes.push('상체 숙임'); }
     if (this.repKneeOverToe) { score -= 10; notes.push('무릎 전진'); }
