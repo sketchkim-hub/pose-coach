@@ -35,11 +35,11 @@ main { max-width: 1200px; margin: 0 auto; padding: 16px; }
 .cam-row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
 .cam-select { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 6px; }
 label { font-size: 14px; color: #9fb4d8; }
-select, button {
+select, button, input[type="text"] {
   padding: 10px 12px; border-radius: 8px; border: 1px solid #2c3650;
   background: #101625; color: #e8ecf4; font-size: 15px;
 }
-select { width: 100%; }
+select, input[type="text"] { width: 100%; }
 button { cursor: pointer; }
 button.primary { background: #2f7bff; border-color: #2f7bff; font-weight: bold; }
 button.primary:disabled { background: #3a4358; border-color: #3a4358; cursor: not-allowed; }
