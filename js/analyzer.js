@@ -39,19 +39,24 @@ class SquatAnalyzer {
     };
   }
 
-  reset() {
-    this.phase = 'ready';      // ready | down | up
+  /** 다음 세트를 위해 rep 상태만 초기화 (정면 베이스라인은 유지) */
+  resetSet() {
+    this.phase = 'ready';
     this.reps = 0;
     this.scores = [];
     this.repMinKnee = 180;
     this.repMaxLean = 0;
     this.repKneeOverToe = false;
-    // 정면 단독 모드용 상태
-    this.frontBase = null;     // 선 자세 엉덩이 Y 기준값 (캘리브레이션)
-    this._frontCalib = [];
     this.repMaxDrop = 0;
     this.repAsym = false;
     this.lastResult = null;
+  }
+
+  reset() {
+    this.resetSet();
+    // 정면 단독 모드용 상태
+    this.frontBase = null;     // 선 자세 엉덩이 Y 기준값 (캘리브레이션)
+    this._frontCalib = [];
   }
 
   /** 가시성이 더 좋은 쪽(좌/우) 랜드마크 선택 */
