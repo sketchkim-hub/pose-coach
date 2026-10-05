@@ -10,7 +10,10 @@ const analyzer = new SquatAnalyzer();
 let engineSide = null;
 let engineFront = null;
 let sessionStart = null;
+let setStartTime = null;
 let running = false;
+let workoutSets = [];   // 이번 운동의 저장된 세트들
+let currentMode = 'dual'; // 'single-side' | 'single-front' | 'dual'
 
 const PHASE_KO = { ready: '대기', down: '하강 중', up: '상승 중' };
 
@@ -56,8 +59,11 @@ async function start() {
 
   analyzer.reset();
   sessionStart = Date.now();
+  setStartTime = sessionStart;
   running = true;
+  workoutSets = [];
   $('rep-log').innerHTML = '';
+  renderSetList();
 
   const videosEl = document.querySelector('.videos');
   const boxes = document.querySelectorAll('.video-box');
@@ -78,6 +84,7 @@ async function start() {
 
       if (role1 === 'side') {
         // 측면 단독: 각도 측정 + rep 카운트 + 채점
+        currentMode = 'single-side';
         setStatLabels('side');
         boxes[0].querySelector('.video-label').textContent = `측면 카메라 — ${label}`;
         engineSide = new PoseEngine($('video-side'), $('canvas-side'), (lm) => {
@@ -88,6 +95,7 @@ async function start() {
         await setupZoom(engineSide);
       } else {
         // 정면 단독: 대칭 체크 + 엉덩이 이동 기반 rep 카운트 (간이 채점)
+        currentMode = 'single-front';
         setStatLabels('front');
         boxes[0].querySelector('.video-label').textContent = `정면 카메라 — ${label}`;
         engineFront = new PoseEngine($('video-side'), $('canvas-side'), (lm) => {
@@ -99,6 +107,7 @@ async function start() {
       }
     } else {
       // ---- 듀얼 카메라 (기존 동작) ----
+      currentMode = 'dual';
       $('stage').classList.remove('single-layout');
       $('cam-controls').style.display = 'none';
       // 역할에 따라 엔진 배정 (같은 카메를 두 역할에 쓰지 않도록)
@@ -197,25 +206,85 @@ function labelOf(deviceId) {
   return '카메라';
 }
 
+/* ---------- 세트 저장 ---------- */
+function saveSet(auto = false) {
+  if (analyzer.reps === 0) {
+    if (!auto) {
+      const ul = $('feedback-list');
+      const li = document.createElement('li');
+      li.textContent = '아직 완료된 횟수가 없어요. 운동을 한 뒤 저장해 주세요.';
+      li.className = 'idle';
+      ul.prepend(li);
+      while (ul.children.length > 6) ul.removeChild(ul.lastChild);
+    }
+    return;
+  }
+  const now = Date.now();
+  const set = {
+    setNo: workoutSets.length + 1,
+    reps: analyzer.reps,
+    scores: [...analyzer.scores],
+    avgScore: analyzer.avgScore(),
+    durationSec: setStartTime ? Math.round((now - setStartTime) / 1000) : 0,
+    savedAt: new Date().toISOString()
+  };
+  workoutSets.push(set);
+  analyzer.resetSet(); // 다음 세트 준비 (정면 베이스라인은 유지)
+  setStartTime = now;
+  renderSetList();
+  $('stat-reps').textContent = '0';
+  $('stat-score').textContent = '-';
+  $('rep-log').innerHTML = '';
+  if (!auto) speak(`${set.setNo}세트 저장`);
+}
+
+/* ---------- 세트 기록 렌더링 ---------- */
+function renderSetList() {
+  const ul = $('set-list');
+  ul.innerHTML = '';
+  if (!workoutSets.length) {
+    ul.innerHTML = '<li class="idle">아직 저장된 세트가 없습니다. 한 세트를 마치면 ‘세트 저장’을 눌러주세요.</li>';
+    return;
+  }
+  workoutSets.forEach((s) => {
+    const li = document.createElement('li');
+    li.textContent = `세트 ${s.setNo} · ${s.reps}회 · 평균 ${s.avgScore}점`;
+    li.className = s.avgScore >= 80 ? 'ok' : 'warn';
+    ul.appendChild(li);
+  });
+}
+
 /* ---------- 측정 종료 ---------- */
 async function stop(silent) {
   running = false;
   if (engineSide) { engineSide.stop(); engineSide = null; }
   if (engineFront) { engineFront.stop(); engineFront = null; }
 
-  if (!silent && analyzer.reps > 0) {
-    const session = {
-      date: new Date().toISOString(),
-      exercise: 'squat',
-      reps: analyzer.reps,
-      avgScore: analyzer.avgScore(),
-      scores: analyzer.scores,
-      durationSec: Math.round((Date.now() - sessionStart) / 1000)
-    };
-    await store.saveSession(session);
-    renderHistory();
+  if (!silent) {
+    // 저장하지 않은 진행 중 세트가 있으면 마지막 세트로 자동 포함
+    if (analyzer.reps > 0) saveSet(true);
+    if (workoutSets.length > 0) {
+      const totalReps = workoutSets.reduce((s, x) => s + x.reps, 0);
+      const allScores = workoutSets.flatMap((x) => x.scores);
+      const workout = {
+        date: new Date().toISOString(),
+        exercise: 'squat',
+        mode: currentMode,
+        sets: workoutSets,
+        totalReps,
+        avgScore: allScores.length
+          ? Math.round(allScores.reduce((a, b) => a + b, 0) / allScores.length)
+          : null,
+        durationSec: Math.round((Date.now() - sessionStart) / 1000)
+      };
+      await store.saveSession(workout);
+      renderHistory();
+    }
   }
 
+  workoutSets = [];
+  setStartTime = null;
+  renderSetList();
   $('btn-start').disabled = false;
   $('btn-stop').disabled = true;
   $('setup-panel').classList.remove('hidden');
@@ -323,7 +392,12 @@ async function renderHistory() {
     const li = document.createElement('li');
     const d = new Date(s.date || s.savedAt);
     const date = `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
-    li.textContent = `${date} · 스쿼트 ${s.reps}회 · 평균 ${s.avgScore}점`;
+    if (s.sets && s.sets.length) {
+      li.textContent = `${date} · 스쿼트 ${s.sets.length}세트 · 총 ${s.totalReps}회 · 평균 ${s.avgScore}점`;
+      li.title = s.sets.map((x) => `세트${x.setNo}: ${x.reps}회 ${x.avgScore}점`).join(' / ');
+    } else {
+      li.textContent = `${date} · 스쿼트 ${s.reps}회 · 평균 ${s.avgScore}점`;
+    }
     ul.appendChild(li);
   });
 }
@@ -331,6 +405,8 @@ async function renderHistory() {
 /* ---------- 초기화 ---------- */
 $('btn-start').addEventListener('click', start);
 $('btn-stop').addEventListener('click', () => stop(false));
+$('btn-save-set').addEventListener('click', () => saveSet(false));
+$('btn-finish').addEventListener('click', () => stop(false));
 $('fit-cover').addEventListener('click', () => setFitMode('cover'));
 $('fit-contain').addEventListener('click', () => setFitMode('contain'));
 window.addEventListener('DOMContentLoaded', async () => {
